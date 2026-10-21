@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>HYDRIX | Smart Water Monitoring</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+    <header class="navbar">
+        <div class="brand">
+            <div class="brand-icon">💧</div>
+
+            <div>
+                <h1>HYDRIX</h1>
+                <p>SMART WATER MONITORING</p>
+            </div>
+        </div>
+
+        <div class="connection-status">
+            <span id="status-indicator" class="status-dot"></span>
+            <span id="connection-status">Connecting...</span>
+        </div>
+    </header>
+
+
+    <main class="container">
+
+        <section class="welcome-section">
+            <div>
+                <p class="eyebrow">YOUR WATER. YOUR HEALTH.</p>
+
+                <h2>Welcome to <span>HYDRIX</span></h2>
+
+                <p class="welcome-description">
+                    Monitor water quality, temperature, and battery
+                    status in real time.
+                </p>
+            </div>
+
+            <div class="live-indicator">
+                <span class="live-dot"></span>
+                LIVE MONITORING
+            </div>
+        </section>
+
+
+        <section class="dashboard-grid">
+
+            <!-- Temperature -->
+            <article class="sensor-card">
+                <div class="card-top">
+                    <div class="sensor-icon temperature-icon">🌡️</div>
+                    <span class="sensor-label">TEMPERATURE</span>
+                </div>
+
+                <h3 id="temperature">--</h3>
+
+                <p class="unit">°C</p>
+
+                <div class="card-footer">
+                    <span>Water temperature</span>
+                    <span class="card-symbol">TEMP</span>
+                </div>
+            </article>
+
+
+            <!-- TDS -->
+            <article class="sensor-card">
+                <div class="card-top">
+                    <div class="sensor-icon tds-icon">💧</div>
+                    <span class="sensor-label">WATER QUALITY</span>
+                </div>
+
+                <h3 id="tds">--</h3>
+
+                <p class="unit">PPM</p>
+
+                <div class="card-footer">
+                    <span>Total dissolved solids</span>
+                    <span class="card-symbol">TDS</span>
+                </div>
+            </article>
+
+
+            <!-- Battery -->
+            <article class="sensor-card">
+                <div class="card-top">
+                    <div class="sensor-icon battery-icon">🔋</div>
+                    <span class="sensor-label">BATTERY</span>
+                </div>
+
+                <h3 id="battery">--</h3>
+
+                <p class="unit">%</p>
+
+                <div class="battery-track">
+                    <div id="battery-bar" class="battery-fill"></div>
+                </div>
+
+                <div class="card-footer">
+                    <span>Estimated charge</span>
+                    <span class="card-symbol">POWER</span>
+                </div>
+            </article>
+
+        </section>
+
+
+        <section class="details-grid">
+
+            <article class="panel">
+                <div class="panel-heading">
+                    <h3>System Status</h3>
+                    <span class="heading-icon">◉</span>
+                </div>
+
+                <div class="status-row">
+                    <span>Device connection</span>
+                    <strong id="device-status">Checking...</strong>
+                </div>
+
+                <div class="status-row">
+                    <span>Monitoring mode</span>
+                    <strong id="monitoring-mode">Checking...</strong>
+                </div>
+
+                <div class="status-row">
+                    <span>Last update</span>
+                    <strong id="last-update">--</strong>
+                </div>
+            </article>
+
+
+            <article class="panel">
+                <div class="panel-heading">
+                    <h3>About HYDRIX</h3>
+                    <span class="heading-icon">✦</span>
+                </div>
+
+                <p class="about-text">
+                    HYDRIX is a smart water monitoring prototype that
+                    brings sensor readings together in one dashboard.
+                </p>
+
+                <div class="feature-tags">
+                    <span>Temperature</span>
+                    <span>TDS Monitoring</span>
+                    <span>Battery Status</span>
+                </div>
+            </article>
+
+        </section>
+
+
+        <footer class="footer">
+            <div class="footer-brand">HYDRIX</div>
+
+            <p>
+                Smart Water Monitoring System
+                <span class="footer-separator">•</span>
+                Arduino + Flask
+            </p>
+
+            <p class="copyright">
+                Built for smarter water monitoring.
+            </p>
+        </footer>
+
+    </main>
+
+
+    <script>
+        async function updateDashboard() {
+            try {
+                const response = await fetch("/api/sensors", {
+                    cache: "no-store"
+                });
+
+                if (!response.ok) {
+                    throw new Error("Could not fetch sensor data");
+                }
+
+                const data = await response.json();
+
+                // Temperature
+                document.getElementById("temperature").textContent =
+                    data.temperature == null
+                        ? "--"
+                        : Number(data.temperature).toFixed(1);
+
+                // TDS
+                document.getElementById("tds").textContent =
+                    data.tds == null
+                        ? "--"
+                        : Math.round(Number(data.tds));
+
+                // Battery
+                const batteryElement =
+                    document.getElementById("battery");
+
+                const batteryBar =
+                    document.getElementById("battery-bar");
+
+                if (data.battery == null) {
+                    batteryElement.textContent = "--";
+                    batteryBar.style.width = "0%";
+                } else {
+                    const battery = Math.max(
+                        0,
+                        Math.min(100, Number(data.battery))
+                    );
+
+                    batteryElement.textContent = Math.round(battery);
+                    batteryBar.style.width = battery + "%";
+                }
+
+                // Connection status
+                const connected = data.connected === true;
+
+                document.getElementById(
+                    "connection-status"
+                ).textContent = connected
+                    ? "Arduino Connected"
+                    : "Demo Mode";
+
+                document.getElementById(
+                    "device-status"
+                ).textContent = connected
+                    ? "Connected"
+                    : "Not connected";
+
+                document.getElementById(
+                    "monitoring-mode"
+                ).textContent = data.mode || "Unknown";
+
+                const indicator = document.getElementById(
+                    "status-indicator"
+                );
+
+                indicator.classList.toggle(
+                    "connected",
+                    connected
+                );
+
+                indicator.classList.toggle(
+                    "disconnected",
+                    !connected
+                );
+
+                document.getElementById(
+                    "last-update"
+                ).textContent = new Date().toLocaleTimeString();
+
+            } catch (error) {
+                document.getElementById(
+                    "connection-status"
+                ).textContent = "Connection Error";
+
+                document.getElementById(
+                    "device-status"
+                ).textContent = "Unavailable";
+
+                document.getElementById(
+                    "status-indicator"
+                ).classList.add("disconnected");
+
+                console.error("Dashboard update failed:", error);
+            }
+        }
+
+        // Fetch readings immediately, then every 2 seconds.
+        updateDashboard();
+        setInterval(updateDashboard, 2000);
+    </script>
+
+</body>
+</html>
