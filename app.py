@@ -1,166 +1,133 @@
-from flask import Flask, jsonify, render_template
-import random
-import serial
-import threading
-import time
-import json
 
-# ==========================================
-# HYDRIX - Smart Water Monitoring System
-# ==========================================
+import os
+import time
+import hmac
+from threading import Lock
+
+from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
-# Arduino serial configuration
-ARDUINO_PORT = "COM6"
-BAUD_RATE = 9600
+# Authentication token configured in Render Environment settings.
+DEVICE_TOKEN = os.environ.get("HYDRIX_DEVICE_TOKEN", "")
 
-# Sensor data storage
-sensor_data_store = {
+# Data received from the ESP32.
+sensor_data = {
     "temperature": None,
     "tds": None,
     "battery": None,
     "connected": False,
-    "mode": "DEMO MODE"
+    "mode": "DEMO MODE",
 }
 
-data_lock = threading.Lock()
+last_update = 0.0
+data_lock = Lock()
 
+DATA_TIMEOUT = 30  # Seconds
 
-# ==========================================
-# Read data from Arduino
-# ==========================================
-
-def read_arduino():
-    while True:
-        try:
-            print(f"[HYDRIX] Connecting to Arduino on {ARDUINO_PORT}...")
-
-            with serial.Serial(
-                ARDUINO_PORT,
-                BAUD_RATE,
-                timeout=2
-            ) as arduino:
-
-                # Allow the Arduino to reset after serial connection
-                time.sleep(2)
-
-                print("[HYDRIX] Arduino connected!")
-
-                while True:
-                    line = arduino.readline().decode(
-                        "utf-8",
-                        errors="ignore"
-                    ).strip()
-
-                    if not line:
-                        continue
-
-                    try:
-                        readings = json.loads(line)
-
-                        temperature = readings.get("temperature")
-                        tds = readings.get("tds")
-                        battery = readings.get("battery")
-
-                        with data_lock:
-                            if temperature is not None:
-                                sensor_data_store["temperature"] = float(
-                                    temperature
-                                )
-
-                            if tds is not None:
-                                sensor_data_store["tds"] = int(tds)
-
-                            if battery is not None:
-                                sensor_data_store["battery"] = int(battery)
-
-                            sensor_data_store["connected"] = True
-                            sensor_data_store["mode"] = "CONNECTED"
-
-                    except (
-                        json.JSONDecodeError,
-                        ValueError,
-                        TypeError
-                    ):
-                        # Ignore serial messages that aren't valid JSON
-                        continue
-
-        except (serial.SerialException, OSError) as error:
-            print(f"[HYDRIX] Arduino unavailable: {error}")
-
-            with data_lock:
-                sensor_data_store["connected"] = False
-                sensor_data_store["mode"] = "DEMO MODE"
-
-            time.sleep(3)
-
-
-# ==========================================
-# Main dashboard
-# ==========================================
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
 
-# ==========================================
-# Sensor API
-# ==========================================
-
-@app.route("/api/sensors")
-def get_sensor_data():
-    with data_lock:
-        current = sensor_data_store.copy()
-
-    # Return actual Arduino readings when connected
-    if current["connected"]:
-        return jsonify(current)
-
-    # Demo mode when Arduino is unavailable
-    return jsonify({
-        "temperature": round(random.uniform(24, 30), 1),
-        "tds": random.randint(200, 450),
-        "battery": random.randint(65, 100),
-        "connected": False,
-        "mode": "DEMO MODE"
-    })
-
-
-# ==========================================
-# Application health check
-# ==========================================
-
-@app.route("/api/health")
+@app.route("/api/health", methods=["GET"])
 def health_check():
     return jsonify({
         "application": "HYDRIX",
-        "status": "running"
+        "status": "running",
+        "readings_endpoint": "/api/readings",
     })
 
 
-# ==========================================
-# Start HYDRIX
-# ==========================================
+@app.route("/api/readings", methods=["POST"])
+def receive_readings():
+    global last_update
+
+    if not DEVICE_TOKEN:
+        return jsonify({
+            "success": False,
+            "error": "Device token is not configured on the server",
+        }), 503
+
+    supplied_token = request.headers.get("X-HYDRIX-TOKEN", "")
+
+    if not hmac.compare_digest(supplied_token, DEVICE_TOKEN):
+        return jsonify({
+            "success": False,
+            "error": "Invalid device token",
+        }), 401
+
+    readings = request.get_json(silent=True)
+
+    if not isinstance(readings, dict):
+        return jsonify({
+            "success": False,
+            "error": "Request must contain a JSON object",
+        }), 400
+
+    try:
+        temperature = float(readings["temperature"])
+        tds = int(readings["tds"])
+        battery = int(readings["battery"])
+
+        if not (-55 <= temperature <= 125):
+            raise ValueError("Temperature is outside the allowed range")
+
+        if not (0 <= tds <= 10000):
+            raise ValueError("TDS is outside the allowed range")
+
+        if not (0 <= battery <= 100):
+            raise ValueError("Battery must be between 0 and 100")
+
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return jsonify({
+            "success": False,
+            "error": "Invalid temperature, tds, or battery values",
+        }), 400
+
+    with data_lock:
+        sensor_data.update({
+            "temperature": temperature,
+            "tds": tds,
+            "battery": battery,
+            "connected": True,
+            "mode": "CONNECTED",
+        })
+        last_update = time.time()
+
+    return jsonify({
+        "success": True,
+        "message": "HYDRIX readings received",
+    }), 200
+
+
+@app.route("/api/sensors", methods=["GET"])
+def get_sensor_data():
+    with data_lock:
+        result = sensor_data.copy()
+        age = time.time() - last_update if last_update else None
+
+    if age is not None and age <= DATA_TIMEOUT:
+        result["connected"] = True
+        result["mode"] = "CONNECTED"
+        return jsonify(result)
+
+    result.update({
+        "connected": False,
+        "mode": "DEMO MODE",
+    })
+
+    return jsonify(result)
+
 
 if __name__ == "__main__":
-    print("=" * 45)
-    print("  HYDRIX Smart Water Monitoring System")
-    print("=" * 45)
+    print("HYDRIX Smart Water Monitoring System")
+    print("Device token configured:", bool(DEVICE_TOKEN))
 
-    # Start Arduino reader in the background
-    reader_thread = threading.Thread(
-        target=read_arduino,
-        daemon=True
-    )
-
-    reader_thread.start()
-
-    # Start Flask server
     app.run(
         host="127.0.0.1",
         port=5000,
-        debug=True,
-        use_reloader=False
+        debug=False,
     )
+
