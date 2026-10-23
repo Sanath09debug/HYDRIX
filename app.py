@@ -9,7 +9,7 @@ from flask import Flask, jsonify, render_template, request
 app = Flask(__name__)
 
 # Authentication token configured in Render Environment settings.
-DEVICE_TOKEN = os.environ.get("HYDRIX_DEVICE_TOKEN", "")
+DEVICE_TOKEN = os.environ.get("HYDRIX_DEVICE_TOKEN", "1a407b98b44a1765f3026aa4f4edd8f918f59f2198dc13341a03c7eec7425b05").strip()
 
 # Data received from the ESP32.
 sensor_data = {
